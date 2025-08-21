@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 import requests
 from fastapi import FastAPI, Query, HTTPException
 
-app = FastAPI(title="Product APIs – Step 1 & Step 2")
+app = FastAPI(title="Product APIs – Step 1, Step 2 & Step 3")
 
 EXTERNAL_API_URL = os.getenv("EXTERNAL_API_URL")  # optional
 LOCAL_SAMPLE_PATH = os.getenv("LOCAL_SAMPLE_PATH", "sample_electronics.json")
@@ -24,10 +24,7 @@ REQUIRED_SOURCE_FIELDS = [
 # Helpers
 # -------------------------------------------------------------------
 def load_source_data() -> List[Dict[str, Any]]:
-    """
-    Loads data from the external API if EXTERNAL_API_URL is set,
-    otherwise from local sample_electronics.json.
-    """
+    """Loads data from external API or local sample file."""
     if EXTERNAL_API_URL:
         try:
             resp = requests.get(EXTERNAL_API_URL, timeout=20)
@@ -50,9 +47,7 @@ def load_source_data() -> List[Dict[str, Any]]:
 
 
 def is_malformed(item: Dict[str, Any]) -> bool:
-    """
-    Step 1: Filter out malformed items.
-    """
+    """Step 1: Filter out malformed items."""
     for k in REQUIRED_SOURCE_FIELDS:
         if k not in item:
             return True
@@ -79,9 +74,7 @@ def is_malformed(item: Dict[str, Any]) -> bool:
 
 
 def map_to_required_shape(item: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Step 1: Map source keys to required shape.
-    """
+    """Step 1: Map source keys to required shape."""
     return {
         "product_id": item.get("productId"),
         "product_name": item.get("productName"),
@@ -103,7 +96,7 @@ def map_to_required_shape(item: Dict[str, Any]) -> Dict[str, Any]:
 # -------------------------------------------------------------------
 @app.get("/")
 def root():
-    return {"message": "Backend running. Use /step1 or /step2 to fetch products."}
+    return {"message": "Backend running. Use /step1, /step2 or /step3 to fetch products."}
 
 
 @app.get("/health")
@@ -113,12 +106,7 @@ def health():
 
 @app.get("/step1")
 def step1() -> List[Dict[str, Optional[Any]]]:
-    """
-    Step 1:
-      - Call source (API or local file)
-      - Filter out malformed items
-      - Return only required fields
-    """
+    """Step 1: Return cleaned product data."""
     data = load_source_data()
 
     cleaned: List[Dict[str, Any]] = []
@@ -137,21 +125,15 @@ def step2(
     release_date_start: Optional[str] = Query(None),
     release_date_end: Optional[str] = Query(None)
 ) -> List[Dict[str, Any]]:
-    """
-    Step 2:
-      - Filter products by release_date range
-      - Params: release_date_start, release_date_end
-    """
-    data = step1()  # reuse cleaned Step 1 data
+    """Step 2: Filter products by release_date range."""
+    data = step1()
 
     try:
         start_date = (
-            datetime.strptime(release_date_start, "%Y-%m-%d")
-            if release_date_start else None
+            datetime.strptime(release_date_start, "%Y-%m-%d") if release_date_start else None
         )
         end_date = (
-            datetime.strptime(release_date_end, "%Y-%m-%d")
-            if release_date_end else None
+            datetime.strptime(release_date_end, "%Y-%m-%d") if release_date_end else None
         )
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
@@ -173,3 +155,20 @@ def step2(
         filtered_products.append(product)
 
     return filtered_products
+
+
+@app.get("/step3")
+def step3(
+    brands: Optional[str] = Query(None, description="Comma separated list of brands"),
+    release_date_start: Optional[str] = Query(None),
+    release_date_end: Optional[str] = Query(None)
+) -> List[Dict[str, Any]]:
+    """Step 3: Filter products by brand and release_date."""
+    data = step2(release_date_start, release_date_end)
+
+    if brands:
+        brand_list = [b.strip() for b in brands.split(",") if b.strip()]
+        valid_brands = {p["brand_name"] for p in data}
+        data = [p for p in data if p["brand_name"] in brand_list and p["brand_name"] in valid_brands]
+
+    return data
