@@ -1,12 +1,14 @@
 import json
 import os
 import re
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException
 import requests
+from fastapi import FastAPI, Query, HTTPException
 
-app = FastAPI(title="Product APIs – Step 1")
+app = FastAPI(title="Product APIs – Step 1 & Step 2")
+
 EXTERNAL_API_URL = os.getenv("EXTERNAL_API_URL")  # optional
 LOCAL_SAMPLE_PATH = os.getenv("LOCAL_SAMPLE_PATH", "sample_electronics.json")
 
@@ -43,29 +45,22 @@ def load_source_data() -> List[Dict[str, Any]]:
             data = json.load(f)
 
     if not isinstance(data, list):
-        # The assignment states the API returns a list of product items
         raise HTTPException(status_code=502, detail="Source did not return a list.")
     return data
 
 
 def is_malformed(item: Dict[str, Any]) -> bool:
     """
-    Step-1 asks us to filter out outright errors/malformed items.
-    We keep nulls (return as null) but:
-      - If a required key is completely missing, it's malformed.
-      - If releaseDate is present and not in 'YYYY-MM-DD' format, it's malformed.
-      - If price is present and not a number, it's malformed.
-      - If averageRating is present and not a number in [0,5], it's malformed.
-      - If ratingCount is present and not a non-negative int, it's malformed.
+    Step 1: Filter out malformed items.
     """
-    # Must contain all required keys (values can be None)
     for k in REQUIRED_SOURCE_FIELDS:
         if k not in item:
             return True
 
-    # Validate formats/ranges ONLY when values are not None
     release_date = item.get("releaseDate")
-    if release_date is not None and not (isinstance(release_date, str) and DATE_RE.match(release_date)):
+    if release_date is not None and not (
+        isinstance(release_date, str) and DATE_RE.match(release_date)
+    ):
         return True
 
     price = item.get("price")
@@ -80,14 +75,12 @@ def is_malformed(item: Dict[str, Any]) -> bool:
     if rc is not None and not (isinstance(rc, int) and rc >= 0):
         return True
 
-    # Everything else passes (even if None)
     return False
 
 
 def map_to_required_shape(item: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Map source keys -> exact casing required by the assignment.
-    Return only those fields; keep values exactly as received (including None).
+    Step 1: Map source keys to required shape.
     """
     return {
         "product_id": item.get("productId"),
@@ -110,7 +103,7 @@ def map_to_required_shape(item: Dict[str, Any]) -> Dict[str, Any]:
 # -------------------------------------------------------------------
 @app.get("/")
 def root():
-    return {"message": "Backend running. Use /step1 to fetch products."}
+    return {"message": "Backend running. Use /step1 or /step2 to fetch products."}
 
 
 @app.get("/health")
@@ -122,12 +115,9 @@ def health():
 def step1() -> List[Dict[str, Optional[Any]]]:
     """
     Step 1:
-      - Call source (external API or local sample file)
-      - Filter out malformed/error items
-      - Return ONLY the specified fields, exact casing, values unchanged
-      - Preserve formats (e.g., release_date stays 'YYYY-MM-DD' if provided)
-      - Keep nulls as null
-      - Return a LIST of items (array), not wrapped
+      - Call source (API or local file)
+      - Filter out malformed items
+      - Return only required fields
     """
     data = load_source_data()
 
@@ -140,3 +130,46 @@ def step1() -> List[Dict[str, Optional[Any]]]:
         cleaned.append(map_to_required_shape(item))
 
     return cleaned
+
+
+@app.get("/step2")
+def step2(
+    release_date_start: Optional[str] = Query(None),
+    release_date_end: Optional[str] = Query(None)
+) -> List[Dict[str, Any]]:
+    """
+    Step 2:
+      - Filter products by release_date range
+      - Params: release_date_start, release_date_end
+    """
+    data = step1()  # reuse cleaned Step 1 data
+
+    try:
+        start_date = (
+            datetime.strptime(release_date_start, "%Y-%m-%d")
+            if release_date_start else None
+        )
+        end_date = (
+            datetime.strptime(release_date_end, "%Y-%m-%d")
+            if release_date_end else None
+        )
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+
+    filtered_products = []
+    for product in data:
+        if not product.get("release_date"):
+            continue
+        try:
+            product_date = datetime.strptime(product["release_date"], "%Y-%m-%d")
+        except ValueError:
+            continue
+
+        if start_date and product_date < start_date:
+            continue
+        if end_date and product_date > end_date:
+            continue
+
+        filtered_products.append(product)
+
+    return filtered_products
