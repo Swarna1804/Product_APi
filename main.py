@@ -291,3 +291,177 @@ def step6(page_size: int = Query(..., gt=0), page_number: int = Query(..., gt=0)
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
     finally:
         db.close()
+from fastapi import FastAPI, HTTPException, Depends
+from pydantic import BaseModel, Field
+from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, Date
+from sqlalchemy.orm import sessionmaker, relationship, declarative_base, Session
+from typing import Optional
+import datetime
+
+# -------------------------------
+# Database Setup
+# -------------------------------
+DATABASE_URL = "sqlite:///./products.db"
+
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+Base = declarative_base()
+
+
+# -------------------------------
+# Database Models
+# -------------------------------
+class Brand(Base):
+    __tablename__ = "brands"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)
+    year_founded = Column(Integer)
+    company_age = Column(Integer)
+    address = Column(String)
+    products = relationship("Product", back_populates="brand")
+
+
+class Product(Base):
+    __tablename__ = "products"
+    id = Column(Integer, primary_key=True, index=True)
+    product_name = Column(String, nullable=False)
+    category_name = Column(String, nullable=False)
+    description_text = Column(String)
+    price = Column(Float)
+    currency = Column(String)
+    processor = Column(String)
+    memory = Column(String)
+    release_date = Column(Date)
+    average_rating = Column(Float)
+    rating_count = Column(Integer)
+    brand_id = Column(Integer, ForeignKey("brands.id"))
+    brand = relationship("Brand", back_populates="products")
+
+
+Base.metadata.create_all(bind=engine)
+
+
+# -------------------------------
+# Pydantic Schemas
+# -------------------------------
+class BrandSchema(BaseModel):
+    name: str
+    year_founded: int
+    company_age: int
+    address: str
+
+
+class ProductSchema(BaseModel):
+    product_name: str
+    brand: BrandSchema
+    category_name: str
+    description_text: str
+    price: float
+    currency: str
+    processor: Optional[str] = None
+    memory: Optional[str] = None
+    release_date: datetime.date
+    average_rating: float
+    rating_count: int
+
+
+# -------------------------------
+# FastAPI App
+# -------------------------------
+app = FastAPI()
+
+
+# Dependency: Get DB session
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+# -------------------------------
+# Step 7: CRUD Endpoints
+# -------------------------------
+
+# CREATE
+@app.post("/step7/create", status_code=201)
+def create_product(product: ProductSchema, db: Session = Depends(get_db)):
+    # Check if brand exists
+    brand = db.query(Brand).filter(Brand.name == product.brand.name).first()
+    if not brand:
+        brand = Brand(
+            name=product.brand.name,
+            year_founded=product.brand.year_founded,
+            company_age=product.brand.company_age,
+            address=product.brand.address
+        )
+        db.add(brand)
+        db.commit()
+        db.refresh(brand)
+
+    db_product = Product(
+        product_name=product.product_name,
+        brand_id=brand.id,
+        category_name=product.category_name,
+        description_text=product.description_text,
+        price=product.price,
+        currency=product.currency,
+        processor=product.processor,
+        memory=product.memory,
+        release_date=product.release_date,
+        average_rating=product.average_rating,
+        rating_count=product.rating_count
+    )
+    db.add(db_product)
+    db.commit()
+    db.refresh(db_product)
+    return {"message": "Product created successfully", "product_id": db_product.id}
+
+
+# UPDATE
+@app.put("/step7/update/{product_id}")
+def update_product(product_id: int, product: ProductSchema, db: Session = Depends(get_db)):
+    db_product = db.query(Product).filter(Product.id == product_id).first()
+    if not db_product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    # Update brand if necessary
+    brand = db.query(Brand).filter(Brand.name == product.brand.name).first()
+    if not brand:
+        brand = Brand(
+            name=product.brand.name,
+            year_founded=product.brand.year_founded,
+            company_age=product.brand.company_age,
+            address=product.brand.address
+        )
+        db.add(brand)
+        db.commit()
+        db.refresh(brand)
+
+    # Update product
+    db_product.product_name = product.product_name
+    db_product.brand_id = brand.id
+    db_product.category_name = product.category_name
+    db_product.description_text = product.description_text
+    db_product.price = product.price
+    db_product.currency = product.currency
+    db_product.processor = product.processor
+    db_product.memory = product.memory
+    db_product.release_date = product.release_date
+    db_product.average_rating = product.average_rating
+    db_product.rating_count = product.rating_count
+
+    db.commit()
+    return {"message": "Product updated successfully"}
+
+
+# DELETE
+@app.delete("/step7/delete/{product_id}", status_code=204)
+def delete_product(product_id: int, db: Session = Depends(get_db)):
+    db_product = db.query(Product).filter(Product.id == product_id).first()
+    if not db_product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    db.delete(db_product)
+    db.commit()
+    return {"message": "Product deleted successfully"}
