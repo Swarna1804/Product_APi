@@ -1,20 +1,21 @@
 import json
 import os
 import re
-from datetime import datetime
+from datetime import datetime, date
 from typing import Any, Dict, List, Optional
 
 import requests
-from fastapi import FastAPI, Query, HTTPException
+from fastapi import FastAPI, Query, HTTPException, Depends
+from pydantic import BaseModel, Field, validator
 
-from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, ForeignKey, Text
-from sqlalchemy.orm import sessionmaker, relationship, declarative_base
+from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, ForeignKey, Text, Date
+from sqlalchemy.orm import sessionmaker, relationship, declarative_base, Session
 from sqlalchemy.exc import SQLAlchemyError
 
 # -------------------------------------------------------------------
 # FastAPI App
 # -------------------------------------------------------------------
-app = FastAPI(title="Product APIs – Step 1 to Step 6")
+app = FastAPI(title="Product APIs – Step 1 to Step 7")
 
 # -------------------------------------------------------------------
 # Config
@@ -41,6 +42,7 @@ engine = create_engine(
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+
 class Brand(Base):
     __tablename__ = "brands"
     id = Column(Integer, primary_key=True, index=True)
@@ -58,38 +60,36 @@ class Brand(Base):
 class Product(Base):
     __tablename__ = "products"
     id = Column(Integer, primary_key=True, index=True)
-    productId = Column(String, unique=True, nullable=False)
-    productName = Column(String, nullable=False)
+    product_id = Column(String, unique=True, nullable=False)
+    product_name = Column(String, nullable=False)
     brand_id = Column(Integer, ForeignKey("brands.id"), nullable=False)
-    category = Column(String)
-    description = Column(Text)
+    category_name = Column(String)
+    description_text = Column(Text)
     price = Column(Float)
     currency = Column(String)
-    discountPercentage = Column(Float)
-    stockQuantity = Column(Integer)
-    warehouseLocation = Column(String)
-    sku = Column(String)
     processor = Column(String)
     memory = Column(String)
-    storageCapacity = Column(String)
-    displaySize = Column(String)
-    isAvailable = Column(Boolean)
-    releaseDate = Column(String)
-    lastUpdated = Column(String)
-    averageRating = Column(Float)
-    ratingCount = Column(Integer)
-    warrantyDurationMonths = Column(Integer)
-    weight_kg = Column(Float)
+    release_date = Column(Date)
+    average_rating = Column(Float)
+    rating_count = Column(Integer)
 
     brand = relationship("Brand", back_populates="products")
 
 
-# create tables if not exist
+# Create tables
 Base.metadata.create_all(bind=engine)
 
 # -------------------------------------------------------------------
 # Helpers
 # -------------------------------------------------------------------
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
 def load_source_data() -> List[Dict[str, Any]]:
     if EXTERNAL_API_URL:
         try:
@@ -143,8 +143,8 @@ def is_malformed(item: Dict[str, Any]) -> bool:
 
 def filter_products(products: List[Dict[str, Any]], release_date_start: Optional[str], release_date_end: Optional[str], brands: Optional[str]) -> List[Dict[str, Any]]:
     try:
-        start_date = datetime.strptime(release_date_start, "%Y-%m-%d") if release_date_start else None
-        end_date = datetime.strptime(release_date_end, "%Y-%m-%d") if release_date_end else None
+        start_date = datetime.strptime(release_date_start, "%Y-%m-%d").date() if release_date_start else None
+        end_date = datetime.strptime(release_date_end, "%Y-%m-%d").date() if release_date_end else None
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
 
@@ -152,7 +152,7 @@ def filter_products(products: List[Dict[str, Any]], release_date_start: Optional
     for p in products:
         if p.get("releaseDate"):
             try:
-                product_date = datetime.strptime(p["releaseDate"], "%Y-%m-%d")
+                product_date = datetime.strptime(p["releaseDate"], "%Y-%m-%d").date()
             except ValueError:
                 continue
             if start_date and product_date < start_date:
@@ -173,18 +173,37 @@ def paginate(products: List[Dict[str, Any]], page_size: int, page_number: int) -
     end_index = start_index + page_size
     return products[start_index:end_index]
 
+
+def map_product_fields(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Map keys to project-required JSON structure"""
+    return {
+        "product_id": item.get("productId"),
+        "product_name": item.get("productName"),
+        "brand_name": item.get("brandName"),
+        "category_name": item.get("category"),
+        "description_text": item.get("description"),
+        "price": item.get("price"),
+        "currency": item.get("currency"),
+        "processor": item.get("processor"),
+        "memory": item.get("memory"),
+        "release_date": item.get("releaseDate"),
+        "average_rating": item.get("averageRating"),
+        "rating_count": item.get("ratingCount"),
+    }
+
+
 # -------------------------------------------------------------------
-# Endpoints
+# Endpoints Step 1–5
 # -------------------------------------------------------------------
 @app.get("/")
 def root():
-    return {"message": "Backend running. Use /step1 ... /step6."}
+    return {"message": "Backend running. Use /step1 ... /step7."}
 
 
 @app.get("/step1")
-def step1() -> List[Dict[str, Any]]:
+def step1():
     data = load_source_data()
-    return [item for item in data if isinstance(item, dict) and not is_malformed(item)]
+    return [map_product_fields(item) for item in data if isinstance(item, dict) and not is_malformed(item)]
 
 
 @app.get("/step2")
@@ -209,14 +228,14 @@ def step5(page_size: int = Query(..., gt=0), page_number: int = Query(..., gt=0)
     electronics = load_source_data()
     brands_data = load_brand_data()
 
-    products = [item for item in electronics if isinstance(item, dict) and not is_malformed(item)]
+    products = [map_product_fields(item) for item in electronics if isinstance(item, dict) and not is_malformed(item)]
     products = filter_products(products, release_date_start, release_date_end, brands)
     products = paginate(products, page_size, page_number)
 
     brand_lookup = {b.get("name"): b for b in brands_data if isinstance(b, dict)}
     merged = []
     for p in products:
-        brand_info = brand_lookup.get(p["brandName"])
+        brand_info = brand_lookup.get(p["brand_name"])
         if brand_info:
             year_founded = brand_info.get("year_founded")
             company_age = datetime.now().year - year_founded if isinstance(year_founded, int) else None
@@ -227,25 +246,25 @@ def step5(page_size: int = Query(..., gt=0), page_number: int = Query(..., gt=0)
             ]))
             merged.append({**p, "brand": {"name": brand_info.get("name"), "yearFounded": year_founded, "companyAge": company_age, "address": address_str}})
         else:
-            merged.append({**p, "brand": {"name": p["brandName"]}})
+            merged.append({**p, "brand": {"name": p["brand_name"], "yearFounded": None, "companyAge": None, "address": None}})
     return merged
 
 
+# -------------------------------------------------------------------
+# Step 6: DB Endpoint
+# -------------------------------------------------------------------
 @app.get("/step6")
 def step6(page_size: int = Query(..., gt=0), page_number: int = Query(..., gt=0),
-          brands: Optional[str] = None, release_date_start: Optional[str] = None, release_date_end: Optional[str] = None):
+          brands: Optional[str] = None, release_date_start: Optional[str] = None, release_date_end: Optional[str] = None,
+          db: Session = Depends(get_db)):
     try:
-        db = SessionLocal()
         query = db.query(Product).join(Brand)
-
         if brands:
             query = query.filter(Brand.name.in_([b.strip() for b in brands.split(",")]))
-
         if release_date_start:
-            query = query.filter(Product.releaseDate >= release_date_start)
+            query = query.filter(Product.release_date >= release_date_start)
         if release_date_end:
-            query = query.filter(Product.releaseDate <= release_date_end)
-
+            query = query.filter(Product.release_date <= release_date_end)
         total = query.count()
         products = query.offset((page_number - 1) * page_size).limit(page_size).all()
 
@@ -255,28 +274,18 @@ def step6(page_size: int = Query(..., gt=0), page_number: int = Query(..., gt=0)
             company_age = datetime.now().year - brand.year_founded if brand.year_founded else None
             address_str = ", ".join(filter(None, [brand.street, brand.city, brand.state, brand.postal_code, brand.country]))
             result.append({
-                "productId": p.productId,
-                "productName": p.productName,
-                "brandName": brand.name,
-                "category": p.category,
-                "description": p.description,
+                "product_id": p.product_id,
+                "product_name": p.product_name,
+                "brand_name": brand.name,
+                "category_name": p.category_name,
+                "description_text": p.description_text,
                 "price": p.price,
                 "currency": p.currency,
-                "discountPercentage": p.discountPercentage,
-                "stockQuantity": p.stockQuantity,
-                "warehouseLocation": p.warehouseLocation,
-                "sku": p.sku,
                 "processor": p.processor,
                 "memory": p.memory,
-                "storageCapacity": p.storageCapacity,
-                "displaySize": p.displaySize,
-                "isAvailable": p.isAvailable,
-                "releaseDate": p.releaseDate,
-                "lastUpdated": p.lastUpdated,
-                "averageRating": p.averageRating,
-                "ratingCount": p.ratingCount,
-                "warrantyDurationMonths": p.warrantyDurationMonths,
-                "weight_kg": p.weight_kg,
+                "release_date": p.release_date.isoformat() if p.release_date else None,
+                "average_rating": p.average_rating,
+                "rating_count": p.rating_count,
                 "brand": {
                     "name": brand.name,
                     "yearFounded": brand.year_founded,
@@ -284,123 +293,51 @@ def step6(page_size: int = Query(..., gt=0), page_number: int = Query(..., gt=0)
                     "address": address_str
                 }
             })
-
         return {"total": total, "page_number": page_number, "page_size": page_size, "items": result}
 
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
-    finally:
-        db.close()
-from fastapi import FastAPI, HTTPException, Depends
-from pydantic import BaseModel, Field
-from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, Date
-from sqlalchemy.orm import sessionmaker, relationship, declarative_base, Session
-from typing import Optional
-import datetime
-
-# -------------------------------
-# Database Setup
-# -------------------------------
-DATABASE_URL = "sqlite:///./products.db"
-
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-Base = declarative_base()
 
 
-# -------------------------------
-# Database Models
-# -------------------------------
-class Brand(Base):
-    __tablename__ = "brands"
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, nullable=False)
-    year_founded = Column(Integer)
-    company_age = Column(Integer)
-    address = Column(String)
-    products = relationship("Product", back_populates="brand")
-
-
-class Product(Base):
-    __tablename__ = "products"
-    id = Column(Integer, primary_key=True, index=True)
-    product_name = Column(String, nullable=False)
-    category_name = Column(String, nullable=False)
-    description_text = Column(String)
-    price = Column(Float)
-    currency = Column(String)
-    processor = Column(String)
-    memory = Column(String)
-    release_date = Column(Date)
-    average_rating = Column(Float)
-    rating_count = Column(Integer)
-    brand_id = Column(Integer, ForeignKey("brands.id"))
-    brand = relationship("Brand", back_populates="products")
-
-
-Base.metadata.create_all(bind=engine)
-
-
-# -------------------------------
-# Pydantic Schemas
-# -------------------------------
+# -------------------------------------------------------------------
+# Step 7: CRUD with Validation
+# -------------------------------------------------------------------
 class BrandSchema(BaseModel):
-    name: str
-    year_founded: int
-    company_age: int
-    address: str
+    name: str = Field(..., min_length=1)
+    year_founded: Optional[int] = None
+    company_age: Optional[int] = None
+    address: Optional[str] = None
 
 
 class ProductSchema(BaseModel):
-    product_name: str
+    product_name: str = Field(..., min_length=1)
     brand: BrandSchema
-    category_name: str
-    description_text: str
-    price: float
-    currency: str
+    category_name: str = Field(..., min_length=1)
+    description_text: Optional[str] = None
+    price: float = Field(..., gt=0)
+    currency: str = Field(..., min_length=1)
     processor: Optional[str] = None
     memory: Optional[str] = None
-    release_date: datetime.date
-    average_rating: float
-    rating_count: int
-
-
-# -------------------------------
-# FastAPI App
-# -------------------------------
-app = FastAPI()
-
-
-# Dependency: Get DB session
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-# -------------------------------
-# Step 7: CRUD Endpoints
-# -------------------------------
+    release_date: date
+    average_rating: float = Field(..., ge=0, le=5)
+    rating_count: int = Field(..., ge=0)
 
 # CREATE
 @app.post("/step7/create", status_code=201)
 def create_product(product: ProductSchema, db: Session = Depends(get_db)):
-    # Check if brand exists
     brand = db.query(Brand).filter(Brand.name == product.brand.name).first()
     if not brand:
         brand = Brand(
             name=product.brand.name,
             year_founded=product.brand.year_founded,
-            company_age=product.brand.company_age,
-            address=product.brand.address
+            street=None, city=None, state=None, postal_code=None, country=None
         )
         db.add(brand)
         db.commit()
         db.refresh(brand)
 
     db_product = Product(
+        product_id=f"P{int(datetime.now().timestamp())}",  # unique ID
         product_name=product.product_name,
         brand_id=brand.id,
         category_name=product.category_name,
@@ -416,30 +353,26 @@ def create_product(product: ProductSchema, db: Session = Depends(get_db)):
     db.add(db_product)
     db.commit()
     db.refresh(db_product)
-    return {"message": "Product created successfully", "product_id": db_product.id}
+    return {"message": "Product created successfully", "product_id": db_product.product_id}
 
 
 # UPDATE
 @app.put("/step7/update/{product_id}")
-def update_product(product_id: int, product: ProductSchema, db: Session = Depends(get_db)):
-    db_product = db.query(Product).filter(Product.id == product_id).first()
+def update_product(product_id: str, product: ProductSchema, db: Session = Depends(get_db)):
+    db_product = db.query(Product).filter(Product.product_id == product_id).first()
     if not db_product:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    # Update brand if necessary
     brand = db.query(Brand).filter(Brand.name == product.brand.name).first()
     if not brand:
         brand = Brand(
             name=product.brand.name,
-            year_founded=product.brand.year_founded,
-            company_age=product.brand.company_age,
-            address=product.brand.address
+            year_founded=product.brand.year_founded
         )
         db.add(brand)
         db.commit()
         db.refresh(brand)
 
-    # Update product
     db_product.product_name = product.product_name
     db_product.brand_id = brand.id
     db_product.category_name = product.category_name
@@ -458,10 +391,10 @@ def update_product(product_id: int, product: ProductSchema, db: Session = Depend
 
 # DELETE
 @app.delete("/step7/delete/{product_id}", status_code=204)
-def delete_product(product_id: int, db: Session = Depends(get_db)):
-    db_product = db.query(Product).filter(Product.id == product_id).first()
+def delete_product(product_id: str, db: Session = Depends(get_db)):
+    db_product = db.query(Product).filter(Product.product_id == product_id).first()
     if not db_product:
         raise HTTPException(status_code=404, detail="Product not found")
     db.delete(db_product)
     db.commit()
-    return {"message": "Product deleted successfully"}
+    return
