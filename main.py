@@ -8,6 +8,10 @@ import requests
 from fastapi import FastAPI, Query, HTTPException
 
 app = FastAPI(title="Product APIs – Step 1 to Step 5")
+
+# -------------------------------------------------------------------
+# Config
+# -------------------------------------------------------------------
 EXTERNAL_API_URL = os.getenv("EXTERNAL_API_URL")  # electronics API
 BRANDS_API_URL = os.getenv("BRANDS_API_URL")  # brands API
 LOCAL_SAMPLE_PATH = os.getenv("LOCAL_SAMPLE_PATH", "sample_electronics.json")
@@ -57,7 +61,7 @@ def load_brand_data() -> List[Dict[str, Any]]:
 
 
 def is_malformed(item: Dict[str, Any]) -> bool:
-    """Step 1: Validate electronics product data."""
+    """Validate electronics product data."""
     for k in REQUIRED_SOURCE_FIELDS:
         if k not in item:
             return True
@@ -84,7 +88,7 @@ def is_malformed(item: Dict[str, Any]) -> bool:
 
 
 def map_to_required_shape(item: Dict[str, Any]) -> Dict[str, Any]:
-    """Step 1: Map electronics API data to required shape."""
+    """Map electronics API data to required shape."""
     return {
         "product_id": item.get("productId"),
         "product_name": item.get("productName"),
@@ -108,7 +112,6 @@ def filter_products(
     brands: Optional[str]
 ) -> List[Dict[str, Any]]:
     """Apply release_date and brand filters."""
-    # Date filter
     try:
         start_date = (
             datetime.strptime(release_date_start, "%Y-%m-%d") if release_date_start else None
@@ -133,7 +136,6 @@ def filter_products(
 
         filtered.append(p)
 
-    # Brand filter
     if brands:
         brand_list = [b.strip() for b in brands.split(",") if b.strip()]
         filtered = [p for p in filtered if p["brand_name"] in brand_list]
@@ -150,20 +152,71 @@ def paginate(products: List[Dict[str, Any]], page_size: int, page_number: int) -
     return products[start_index:end_index]
 
 
-@app.get("/step5")
-def step5(
-    page_size: int = Query(..., gt=0, description="Items per page"),
-    page_number: int = Query(..., gt=0, description="Page number starting from 1"),
+@app.get("/")
+def root():
+    return {"message": "Backend running. Use /step1 ... /step5."}
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.get("/step1")
+def step1() -> List[Dict[str, Any]]:
+    data = load_source_data()
+    cleaned = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        if is_malformed(item):
+            continue
+        cleaned.append(map_to_required_shape(item))
+    return cleaned
+
+
+@app.get("/step2")
+def step2(
+    release_date_start: Optional[str] = Query(None),
+    release_date_end: Optional[str] = Query(None)
+) -> List[Dict[str, Any]]:
+    data = step1()
+    return filter_products(data, release_date_start, release_date_end, None)
+
+
+@app.get("/step3")
+def step3(
     brands: Optional[str] = Query(None),
     release_date_start: Optional[str] = Query(None),
     release_date_end: Optional[str] = Query(None)
 ) -> List[Dict[str, Any]]:
-    """Step 5: Merge electronics API with brands API + all filters + pagination."""
-    # Load data
+    data = step2(release_date_start=release_date_start, release_date_end=release_date_end)
+    return filter_products(data, None, None, brands)
+
+
+@app.get("/step4")
+def step4(
+    page_size: int = Query(..., gt=0),
+    page_number: int = Query(..., gt=0),
+    brands: Optional[str] = Query(None),
+    release_date_start: Optional[str] = Query(None),
+    release_date_end: Optional[str] = Query(None)
+) -> List[Dict[str, Any]]:
+    data = step3(brands=brands, release_date_start=release_date_start, release_date_end=release_date_end)
+    return paginate(data, page_size, page_number)
+
+
+@app.get("/step5")
+def step5(
+    page_size: int = Query(..., gt=0),
+    page_number: int = Query(..., gt=0),
+    brands: Optional[str] = Query(None),
+    release_date_start: Optional[str] = Query(None),
+    release_date_end: Optional[str] = Query(None)
+) -> List[Dict[str, Any]]:
     electronics = load_source_data()
     brands_data = load_brand_data()
 
-    # Clean electronics
     products = []
     for item in electronics:
         if not isinstance(item, dict):
@@ -172,16 +225,11 @@ def step5(
             continue
         products.append(map_to_required_shape(item))
 
-    # Apply filters
     products = filter_products(products, release_date_start, release_date_end, brands)
-
-    # Paginate
     products = paginate(products, page_size, page_number)
 
-    # Index brand info by name
     brand_lookup = {b.get("name"): b for b in brands_data if isinstance(b, dict)}
 
-    # Merge
     merged = []
     for p in products:
         brand_info = brand_lookup.get(p["brand_name"])
@@ -221,7 +269,6 @@ def step5(
                 "rating_count": p["rating_count"]
             })
         else:
-            # If brand missing in brands API, still return product with minimal info
             merged.append({
                 **p,
                 "brand": {
