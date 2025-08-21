@@ -1,0 +1,53 @@
+[
+  {
+    "productId": "SKU-LPTP-001",
+    "productName": "Innovatech ProBook X1",
+    "brandName": "Innovatech",
+    "category": "Laptops",
+    "description": "A high-performance laptop for professionals, featuring a powerful processor and a sleek, durable design for productivity on the go.",
+    "price": 1299.99,
+    "currency": "USD",
+    "processor": "Innovatech Fusion Z1",
+    "memory": "16GB DDR5",
+    "releaseDate": "2025-01-20",
+    "averageRating": 4.7,
+    "ratingCount": 312,
+    "discountPercentage": 5,
+    "stockQuantity": 85,
+    "sku": "INVT-PBX1-2025-512",
+    "storageCapacity": "512GB SSD",
+    "displaySize": "14 inches",
+    "isAvailable": true,
+    "lastUpdated": "2024-08-01T10:00:00Z",
+    "warrantyDurationMonths": 24,
+    "weight_kg": 1.4
+  },
+  {
+    "productId": "SKU-PHN-002",
+    "productName": "Quantum Q-Phone Ultra",
+    "brandName": "Quantum",
+    "category": "Smartphones",
+    "description": "Flagship smartphone with pro camera system.",
+    "price": 999.0,
+    "currency": "USD",
+    "processor": "Quantum Core M3",
+    "memory": "12GB",
+    "releaseDate": "2024-12-19",
+    "averageRating": 4.5,
+    "ratingCount": 980
+  },
+  {
+    "productId": "BAD-ITEM-003",
+    "productName": "Broken Thing",
+    "brandName": "Glitch",
+    "category": "Unknown",
+    "description": "This one is intentionally malformed: wrong date + avg out of range.",
+    "price": 500,
+    "currency": "USD",
+    "processor": "???",
+    "memory": "8GB",
+    "releaseDate": "19-12-2024",
+    "averageRating": 6.2,
+    "ratingCount": -4
+  }
+]
