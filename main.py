@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 import requests
 from fastapi import FastAPI, Query, HTTPException
 
-app = FastAPI(title="Product APIs – Step 1, Step 2 & Step 3")
+app = FastAPI(title="Product APIs – Step 1 to Step 4")
 
 EXTERNAL_API_URL = os.getenv("EXTERNAL_API_URL")  # optional
 LOCAL_SAMPLE_PATH = os.getenv("LOCAL_SAMPLE_PATH", "sample_electronics.json")
@@ -24,7 +24,7 @@ REQUIRED_SOURCE_FIELDS = [
 # Helpers
 # -------------------------------------------------------------------
 def load_source_data() -> List[Dict[str, Any]]:
-    """Loads data from external API or local sample file."""
+    """Load data from external API or local file."""
     if EXTERNAL_API_URL:
         try:
             resp = requests.get(EXTERNAL_API_URL, timeout=20)
@@ -96,7 +96,7 @@ def map_to_required_shape(item: Dict[str, Any]) -> Dict[str, Any]:
 # -------------------------------------------------------------------
 @app.get("/")
 def root():
-    return {"message": "Backend running. Use /step1, /step2 or /step3 to fetch products."}
+    return {"message": "Backend running. Use /step1, /step2, /step3, or /step4."}
 
 
 @app.get("/health")
@@ -106,7 +106,7 @@ def health():
 
 @app.get("/step1")
 def step1() -> List[Dict[str, Optional[Any]]]:
-    """Step 1: Return cleaned product data."""
+    """Step 1: Clean and return product data."""
     data = load_source_data()
 
     cleaned: List[Dict[str, Any]] = []
@@ -130,10 +130,12 @@ def step2(
 
     try:
         start_date = (
-            datetime.strptime(release_date_start, "%Y-%m-%d") if release_date_start else None
+            datetime.strptime(release_date_start, "%Y-%m-%d")
+            if release_date_start else None
         )
         end_date = (
-            datetime.strptime(release_date_end, "%Y-%m-%d") if release_date_end else None
+            datetime.strptime(release_date_end, "%Y-%m-%d")
+            if release_date_end else None
         )
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
@@ -163,12 +165,35 @@ def step3(
     release_date_start: Optional[str] = Query(None),
     release_date_end: Optional[str] = Query(None)
 ) -> List[Dict[str, Any]]:
-    """Step 3: Filter products by brand and release_date."""
-    data = step2(release_date_start, release_date_end)
+    """Step 3: Add brand filtering to Step 2."""
+    data = step2(release_date_start=release_date_start, release_date_end=release_date_end)
 
-    if brands:
-        brand_list = [b.strip() for b in brands.split(",") if b.strip()]
-        valid_brands = {p["brand_name"] for p in data}
-        data = [p for p in data if p["brand_name"] in brand_list and p["brand_name"] in valid_brands]
+    if not brands:
+        return data
 
-    return data
+    brand_list = [b.strip() for b in brands.split(",") if b.strip()]
+    if not brand_list:
+        raise HTTPException(status_code=400, detail="Invalid brand filter format.")
+
+    filtered = [p for p in data if p["brand_name"] in brand_list]
+    return filtered
+
+
+@app.get("/step4")
+def step4(
+    page_size: int = Query(..., gt=0, description="Items per page"),
+    page_number: int = Query(..., gt=0, description="Page number starting from 1"),
+    brands: Optional[str] = Query(None),
+    release_date_start: Optional[str] = Query(None),
+    release_date_end: Optional[str] = Query(None)
+) -> List[Dict[str, Any]]:
+    """Step 4: Pagination + brand/date filters."""
+    data = step3(brands=brands, release_date_start=release_date_start, release_date_end=release_date_end)
+
+    start_index = (page_number - 1) * page_size
+    end_index = start_index + page_size
+
+    if start_index >= len(data):
+        return []
+
+    return data[start_index:end_index]
